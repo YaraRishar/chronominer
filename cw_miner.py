@@ -23,16 +23,14 @@ def locate(xpath: str) -> WebElement | None:
         element = driver.find_element(By.XPATH, xpath)
         return element
     except NoSuchElementException:
-        if is_cw3_disabled():
-            refresh()
-            locate(xpath)
-        else:
-            return None
+        time.sleep(3)
+        locate(xpath)
 
 
 def click(xpath="xpath", offset_range=(0, 0), given_element=None) -> bool:
     """Клик по элементу element с оффсетом offset_range.
-    Возвращает True, если был совершён клик по элементу. """
+    Возвращает True, если был совершён клик по элементу.
+    """
 
     if xpath != "xpath" and not given_element:
         element = locate(xpath)
@@ -82,21 +80,23 @@ def crash_handler(exception_type: Exception):
 
 def refresh():
     """Перезагрузить страницу"""
+
     driver.refresh()
     print("Страница обновлена!")
 
 
 def start_rabbit_game(games_played: int):
-    driver.get("https://catwar.su/chat")
+    driver.get("https://catwar.net/chat")
     time.sleep(random.uniform(1, 3))
     click(xpath="//a[@data-bind='openPrivateWith_form']")
     type_in_chat("Системолап", entry_xpath="//input[@id='openPrivateWith']")
     click(xpath="//*[@id='openPrivateWith_form']/p/input[2]")  # OK button
 
     while games_played != 5:
-        rabbit_game()
-        games_played += 1
-        write_log(games_played)
+        success = rabbit_game()
+        if success:
+            games_played += 1
+            write_log(games_played)
 
 
 def write_log(games_played: int):
@@ -113,8 +113,7 @@ def read_log():
     is_mining_done = False
 
     if not os.path.exists("log.txt"):
-        log = open("log.txt", "w")
-        log.close()
+        log = open("log.txt", "w").close()
         print("Создан новый лог кролей.")
         games_played = get_games_played()
         return games_played
@@ -134,28 +133,29 @@ def read_log():
 
 
 def get_games_played() -> int:
-    driver.get("https://catwar.su/rabbit_log")
-    print("Открыт лог кролей: https://catwar.su/rabbit_log...")
+    driver.get("https://catwar.net/rabbit_log")
+    print("Открыт лог кролей: https://catwar.net/rabbit_log...")
     rabbit_log = []
     now = datetime.datetime.now()
     current_date = now.strftime("%Y-%m-%d")
     for i in range(4):
         timestamp = locate(xpath=f"/html/body/div[3]/div/table/tbody/tr[{2 + i}]/td[1]").text
-        if locate(f"/html/body/div[3]/div/table/tbody/tr[{2 + i}]/td[2]").text != "Получение кролей за игру в числа":
+        rabbits_obtained_by = locate(f"/html/body/div[3]/div/table/tbody/tr[{2 + i}]/td[2]").text
+        if rabbits_obtained_by != "Получение кролей за игру в числа":
             continue
         date_played = re.findall(pattern=r"(\d*-\d*-\d*)", string=timestamp)[0]
         if date_played == current_date:
             rabbit_log.append(timestamp)
         else:
             break
-    print("Сегодня было сыграно игр в числа:", len(rabbit_log))
+    print(f"Сегодня было сыграно игр в числа: {len(rabbit_log)}")
     return len(rabbit_log)
 
 
 def get_last_message() -> str:
     last_message = locate(xpath="//div[@class='mess_div']/div[@class='parsed']").text
     while not bool(last_message):
-        print("cant detect last message, trying again...")
+        print("Ошибка при поиске последнего сообщения, страница перезагружается...")
         refresh()
         time.sleep(random.uniform(1, 2))
         last_message = get_last_message()
@@ -167,6 +167,7 @@ def rabbit_game(lower_bound=-9999999999, upper_bound=9999999999) -> bool:
     """max 35 guesses"""
 
     last_message = ""
+    last_difference = -1
     while "это" not in last_message:
         time.sleep(random.uniform(0.8, 2.5))
         guess = (upper_bound + lower_bound) // 2
@@ -190,17 +191,24 @@ def rabbit_game(lower_bound=-9999999999, upper_bound=9999999999) -> bool:
             else:
                 lower_bound = upper_bound
         elif "это" in last_message:
-            print("число угадано, +4 кроля!")
+            print("\tЧисло угадано, +4 кроля!")
             return True
         else:
-            print(f"Произошла ошибка при парсинге сообщения с текстом {last_message}")
+            print(f"Произошла ошибка при парсинге сообщения с текстом {last_message}...")
             return False
 
         print(last_message.split(", ")[0])
-        print(f"({lower_bound}, {upper_bound}), difference = {upper_bound - lower_bound}")
+        difference = upper_bound - lower_bound
+        print(f"({lower_bound}, {upper_bound}), difference = {difference}")
+        if last_difference == difference:
+            print("Произошла ошибка с зацикливанием...")
+            return False
+        last_difference = difference
 
 
 def type_in_chat(text: str, entry_xpath: str):
+    """ Написать сообщение text в элемент на entry_xpath """
+
     text = list(text)
     chatbox: WebElement = locate(entry_xpath)
     for i in range(len(text)):
@@ -218,14 +226,15 @@ print("Майнер кролей chronominer v1.0 запускается...\nП�
       "Вебдрайвер запускается...")
 options = webdriver.ChromeOptions()
 options.add_argument("--start-maximized")
-options.add_argument("no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--disable-gpu")  # windows....
-options.add_argument("--remote-debugging-port=9222")
+# options.add_argument("no-sandbox")
+# options.add_argument("--disable-dev-shm-usage")
+# options.add_argument("--disable-gpu")  # windows....
+# options.add_argument("--remote-debugging-port=9222")
 options.add_argument("user-data-dir=selenium")
 options.add_experimental_option("excludeSwitches", ["enable-automation"])
 options.add_experimental_option('useAutomationExtension', False)
 
+options.add_argument("--headless")
 driver = webdriver.Chrome(options=options)
 stealth(driver,
         languages=["en-US", "en"],
